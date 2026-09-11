@@ -1,0 +1,618 @@
+import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import { Image } from "expo-image";
+import { Lock, Mail, User } from "lucide-react-native";
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions
+} from "react-native";
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming
+} from "react-native-reanimated";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+
+import NeatifyLogo from "../../assets/images/neatifylogo.png";
+import PrivacyModal from "../components/PrivacyModal";
+import TermsModal from "../components/TermsModal";
+import { useLanguage } from "../context/LanguageContext";
+import { useTheme } from "../context/ThemeContext";
+import { useNotification } from "../hooks/useNotification";
+import { supabase } from "../lib/supabase";
+import { COLORS } from "../theme/colors";
+import { generateReferralCode } from "../utils/referralUtils";
+// Animated Input Component
+function AnimatedInput({ icon, placeholder, value, onChange, secureTextEntry, rightElement, keyboardType, maxLength, autoCapitalize }: any) {
+  const [isFocused, setIsFocused] = useState(false);
+  const focusAnim = useSharedValue(0);
+
+  useEffect(() => {
+    focusAnim.value = withTiming(isFocused ? 1 : 0, { duration: 250 });
+  }, [isFocused]);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      borderColor: interpolateColor(focusAnim.value, [0, 1], ["#F0F0F0", COLORS.saffron]),
+      shadowOpacity: focusAnim.value * 0.1,
+      shadowRadius: focusAnim.value * 6,
+      shadowColor: COLORS.saffron,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: focusAnim.value * 3,
+      transform: [{ scale: 1 + focusAnim.value * 0.01 }]
+    };
+  });
+
+  return (
+    <Animated.View style={[styles.animatedInputContainer, animatedStyle]}>
+      {icon}
+      <TextInput
+        style={styles.input}
+        placeholder={placeholder}
+        placeholderTextColor="#888"
+        value={value}
+        onChangeText={onChange}
+        secureTextEntry={secureTextEntry}
+        onFocus={() => setIsFocused(true)}
+        onBlur={() => setIsFocused(false)}
+        keyboardType={keyboardType}
+        maxLength={maxLength}
+        autoCapitalize={autoCapitalize}
+      />
+      {rightElement}
+    </Animated.View>
+  );
+}
+
+// ----------------------------------------------------
+// MAIN COMPONENT
+// ----------------------------------------------------
+export default function LoginScreen(props: any) {
+  const navigation = useNavigation<any>();
+  const { showAlert, showToast } = useNotification();
+  const { t } = useLanguage();
+  const { theme, isDark } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 768;
+
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [termsViewed, setTermsViewed] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const checkProfileAndNavigate = async (userId: string, userEmail: string, userName?: string, isNewSignup: boolean = false) => {
+    try {
+      const { data: profile } = await supabase
+        .from("profile")
+        .select("id, full_name, email")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (!profile || isNewSignup) {
+        const myReferralCode = generateReferralCode(userName || userEmail || "User");
+
+        await supabase
+          .from("profile")
+          .upsert({
+            id: userId,
+            full_name: userName || profile?.full_name || "",
+            email: userEmail,
+            referral_code: myReferralCode,
+          });
+
+        await supabase.from("wallet").upsert({
+          user_id: userId,
+          balance: 0
+        });
+      }
+
+      navigation.reset({ index: 0, routes: [{ name: "HomeDrawer" }] });
+    } catch (err) {
+      console.error("Profile check/create failed:", err);
+      navigation.reset({ index: 0, routes: [{ name: "HomeDrawer" }] });
+    }
+  };
+
+  const handleAuth = async () => {
+    if (!email.trim() || !password.trim()) {
+      showAlert({ type: "warning", title: "Missing Fields", message: "Please fill in all required fields." });
+      return;
+    }
+
+    if (authMode === 'signup' && !fullName.trim()) {
+      showAlert({ type: "warning", title: "Missing Name", message: "Please enter your full name." });
+      return;
+    }
+
+    if (!termsAccepted && authMode === 'signup') {
+      showAlert({ type: "warning", title: "Terms Required", message: "Please accept the Terms & Conditions." });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      if (authMode === 'login') {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: password
+        });
+
+        if (error) throw error;
+        if (!data.user) throw new Error("Login failed");
+
+        await checkProfileAndNavigate(data.user.id, data.user.email || "", "", false);
+
+      } else {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: password,
+          options: {
+            data: {
+              full_name: fullName.trim(),
+            }
+          }
+        });
+
+        if (error) throw error;
+        if (!data.user) throw new Error("Signup failed");
+
+        // If email verification is required, you might want to show a toast here instead
+        if (data.session) {
+          await checkProfileAndNavigate(data.user.id, data.user.email || "", fullName.trim(), true);
+        } else {
+          showAlert({ type: "info", title: "Verify Email", message: "Please check your inbox to verify your email." });
+          setAuthMode('login');
+        }
+      }
+    } catch (err: any) {
+      console.error("Auth error:", err);
+      showAlert({ type: "error", title: "Authentication Failed", message: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // -------------------------------------
+  // Animations
+  // -------------------------------------
+  const characterBob = useSharedValue(0);
+  const buttonScale = useSharedValue(1);
+
+  useEffect(() => {
+    characterBob.value = withRepeat(
+      withSequence(
+        withTiming(-10, { duration: 1800 }),
+        withTiming(0, { duration: 1800 })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const characterAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateY: characterBob.value }],
+    };
+  });
+
+  const buttonAnimatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: buttonScale.value }],
+    };
+  });
+
+  const handlePressIn = () => { buttonScale.value = withSpring(0.96); };
+  const handlePressOut = () => { buttonScale.value = withSpring(1); };
+
+  // -------------------------------------
+  // Render
+  // -------------------------------------
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#FDFDFD" }}>
+      <StatusBar barStyle="dark-content" backgroundColor="#FDFDFD" />
+
+      {/* Subtle Background Elements */}
+      <View style={StyleSheet.absoluteFillObject} pointerEvents="none">
+        <View style={styles.bgCircleTop} />
+        <View style={styles.bgCircleBottom} />
+      </View>
+
+      {/* BACK BUTTON */}
+      <TouchableOpacity
+        onPress={() => { navigation.canGoBack() ? navigation.goBack() : navigation.replace("HomeDrawer"); }}
+        style={[styles.backBtn, { top: Math.max(insets.top, 10) }]}
+      >
+        <Ionicons name="arrow-back" size={24} color="#111" />
+      </TouchableOpacity>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContainer,
+            isDesktop && { flexDirection: "row", alignItems: "center", justifyContent: "center" }
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+
+          {/* DESKTOP RIGHT SIDE / MOBILE TOP: 3D Character */}
+          <View style={[isDesktop ? styles.desktopCharacterContainer : styles.mobileCharacterContainer]}>
+            <Animated.View style={characterAnimatedStyle}>
+              <Image
+                source={require("../../assets/images/heroimg.png")}
+                style={isDesktop ? styles.desktopCharacterImage : styles.mobileCharacterImage}
+                contentFit="contain"
+              />
+            </Animated.View>
+          </View>
+
+          {/* FORM CONTAINER */}
+          <Animated.View
+            entering={FadeInUp.duration(600).delay(100)}
+            style={[styles.formContainer, isDesktop && styles.desktopFormContainer]}
+          >
+            <View style={styles.header}>
+              <Image source={NeatifyLogo} style={styles.logo} contentFit="contain" />
+              <Text style={styles.subtitle}>
+                Welcome to Neatify! Ready for a sparkling clean home?
+              </Text>
+            </View>
+
+            <View style={styles.form}>
+
+              {authMode === 'signup' && (
+                <Animated.View entering={FadeInDown.duration(400)}>
+                  <AnimatedInput
+                    icon={<User size={20} color="#888" />}
+                    placeholder="Full Name"
+                    value={fullName}
+                    onChange={setFullName}
+                    autoCapitalize="words"
+                  />
+                  <View style={{ height: 12 }} />
+                </Animated.View>
+              )}
+
+              <Animated.View entering={FadeInDown.duration(400).delay(100)}>
+                <AnimatedInput
+                  icon={<Mail size={20} color="#888" />}
+                  placeholder="Email Address"
+                  value={email}
+                  onChange={setEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </Animated.View>
+
+              <View style={{ height: 12 }} />
+
+              <Animated.View entering={FadeInDown.duration(400).delay(200)}>
+                <AnimatedInput
+                  icon={<Lock size={20} color="#888" />}
+                  placeholder="Password"
+                  value={password}
+                  onChange={setPassword}
+                  secureTextEntry={!showPassword}
+                  rightElement={
+                    <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={{ padding: 4 }}>
+                      <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={20} color="#888" />
+                    </TouchableOpacity>
+                  }
+                />
+                {authMode === 'login' && (
+                  <TouchableOpacity 
+                    style={{ alignSelf: "flex-end", marginTop: 8 }}
+                    onPress={() => navigation.navigate("ResetPassword")}
+                  >
+                    <Text style={{ color: COLORS.saffron, fontWeight: "600", fontSize: 13 }}>Forgot Password?</Text>
+                  </TouchableOpacity>
+                )}
+              </Animated.View>
+
+              {authMode === 'signup' && (
+                <Animated.View entering={FadeInDown.duration(400).delay(300)}>
+                  <View style={{ height: 12 }} />
+
+                  {/* Terms & Conditions Row */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 8, paddingHorizontal: 4 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (!termsViewed) {
+                          setShowTermsModal(true);
+                        } else {
+                          setTermsAccepted(!termsAccepted);
+                        }
+                      }}
+                      style={{ marginRight: 8, padding: 4 }}
+                    >
+                      <Ionicons
+                        name={termsAccepted ? "checkbox" : "square-outline"}
+                        size={24}
+                        color={termsAccepted ? COLORS.saffron : "#888"}
+                      />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 13, color: "#111", flex: 1 }}>
+                      I agree to the{" "}
+                      <Text style={{ color: COLORS.saffron, fontWeight: "700" }} onPress={() => setShowTermsModal(true)}>
+                        Terms
+                      </Text>
+                      {" "}and{" "}
+                      <Text style={{ color: COLORS.saffron, fontWeight: "700" }} onPress={() => setShowPrivacyModal(true)}>
+                        Privacy Policy
+                      </Text>
+                    </Text>
+                  </View>
+                </Animated.View>
+              )}
+
+              <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} onPress={handleAuth} disabled={loading} style={{ marginTop: 20 }}>
+                <Animated.View style={[styles.primaryBtn, buttonAnimatedStyle]}>
+                  {loading ? (
+                    <ActivityIndicator color="#111" />
+                  ) : (
+                    <Text style={styles.primaryText}>{authMode === 'login' ? 'Login' : 'Sign Up'}</Text>
+                  )}
+                </Animated.View>
+              </Pressable>
+
+              {authMode === 'login' && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 15 }}>
+                    <View style={{ flex: 1, height: 1, backgroundColor: "#E5E5E5" }} />
+                    <Text style={{ marginHorizontal: 10, color: "#888", fontSize: 13, fontWeight: "600" }}>OR</Text>
+                    <View style={{ flex: 1, height: 1, backgroundColor: "#E5E5E5" }} />
+                  </View>
+
+                  <Pressable 
+                    onPress={async () => {
+                      try {
+                        setLoading(true);
+                        const { signInWithGoogle } = await import('../auth/useGoogleAuth');
+                        await signInWithGoogle();
+                      } catch (err: any) {
+                        showAlert({ type: "error", title: "Google Sign-In Failed", message: err.message });
+                      } finally {
+                        setLoading(false);
+                      }
+                    }} 
+                    disabled={loading}
+                  >
+                    <View style={styles.googleBtn}>
+                      <Image 
+                        source={{ uri: "https://developers.google.com/identity/images/g-logo.png" }} 
+                        style={{ width: 22, height: 22, marginRight: 10 }} 
+                        contentFit="contain" 
+                      />
+                      <Text style={styles.googleBtnText}>Continue with Google</Text>
+                    </View>
+                  </Pressable>
+                </>
+              )}
+
+              <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 20 }}>
+                <Text style={{ color: "#555", fontSize: 14 }}>
+                  {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                </Text>
+                <TouchableOpacity onPress={() => {
+                  setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                }}>
+                  <Text style={styles.linkText}>{authMode === 'login' ? 'Sign Up' : 'Login'}</Text>
+                </TouchableOpacity>
+              </View>
+
+            </View>
+          </Animated.View>
+
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* PRIVACY POLICY MODAL */}
+      <TermsModal
+        visible={showTermsModal}
+        onClose={() => setShowTermsModal(false)}
+        onAccept={() => {
+          setTermsViewed(true);
+          setTermsAccepted(true);
+          setShowTermsModal(false);
+        }}
+      />
+      <PrivacyModal
+        visible={showPrivacyModal}
+        onClose={() => setShowPrivacyModal(false)}
+        onAccept={() => {
+          setShowPrivacyModal(false);
+        }}
+      />
+
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  bgCircleTop: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: COLORS.saffron + "15",
+    top: -100,
+    right: -100,
+  },
+  bgCircleBottom: {
+    position: "absolute",
+    width: 400,
+    height: 400,
+    borderRadius: 200,
+    backgroundColor: COLORS.saffron + "10",
+    bottom: -150,
+    left: -150,
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    paddingHorizontal: "5%",
+    paddingTop: 30,
+    paddingBottom: 40
+  },
+  backBtn: {
+    position: "absolute",
+    left: 16,
+    zIndex: 100,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  mobileCharacterContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: -45, // Deeper overlap to place character behind card
+    marginTop: 10,
+    zIndex: 1,
+  },
+  desktopCharacterContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 40,
+  },
+  mobileCharacterImage: {
+    width: 180, // Scaled down
+    height: 160,
+  },
+  desktopCharacterImage: {
+    width: "100%",
+    height: 500,
+    maxWidth: 450,
+  },
+  formContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24, // reduced corners slightly
+    padding: 20, // reduced internal padding
+    paddingTop: 24, // Card top spacing
+    paddingBottom: 28,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    elevation: 8,
+    zIndex: 2,
+  },
+  desktopFormContainer: {
+    flex: 1,
+    maxWidth: 500,
+    marginVertical: 40,
+  },
+  header: {
+    marginBottom: 20,
+    alignItems: "center", // Center horizontally
+  },
+  logo: {
+    width: 130, // Smaller branding
+    height: 38,
+    marginBottom: 16, // Spacing between logo and heading
+  },
+  subtitle: {
+    color: "#111", // Black/dark text
+    fontSize: 16,
+    fontFamily: Platform.OS === 'android' ? 'sans-serif-rounded' : 'Arial Rounded MT Bold',
+    fontWeight: Platform.OS === 'android' ? 'normal' : '700',
+    lineHeight: 22,
+    textAlign: "center",
+    paddingHorizontal: 8,
+  },
+  form: {
+    gap: 12, // reduced gaps
+  },
+  animatedInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#F0F0F0", // subtle grey
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14, // slightly rounder
+    paddingVertical: 12, // shorter height
+    paddingHorizontal: 14,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    marginLeft: 12,
+    color: "#111",
+    fontWeight: "500",
+  },
+  primaryBtn: {
+    backgroundColor: COLORS.saffron,
+    height: 52, // Shorter height
+    borderRadius: 14, // match input border radius
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+    shadowColor: COLORS.saffron,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2, // subtle shadow
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  primaryText: {
+    color: "#111",
+    fontWeight: "800",
+    fontSize: 15,
+    letterSpacing: 0.5,
+  },
+  googleBtn: {
+    backgroundColor: "#FFFFFF",
+    height: 52,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "#E5E5E5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  googleBtnText: {
+    color: "#333",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  linkText: {
+    fontWeight: "800",
+    color: COLORS.saffron,
+    fontSize: 14,
+  },
+});
