@@ -134,7 +134,7 @@ export default function ComingSoonScreen() {
           <Animated.View entering={FadeInDown.duration(600).delay(200)} style={styles.textContainer}>
             <Text style={styles.title}>We're coming soon! 📍</Text>
             <Text style={styles.subtitle}>
-              Neatify isn't available in your area yet.
+             The Neatify Team isn't available in your area yet.
             </Text>
             <Text style={styles.desc}>
               Please try a different location to find available services near you.

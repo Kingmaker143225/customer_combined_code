@@ -298,7 +298,7 @@ export default function ProfileScreen() {
 
   const handleShareReferral = async () => {
     try {
-      const message = `Hey! Join me on Neatify and get ₹50 off on your first home service booking. Use my referral code: ${referralCode}\n\nDownload now: https://theneatifyteam.com/download`;
+      const message = `Hey! Join me on The Neatify Team and get ₹50 off on your first home service booking. Use my referral code: ${referralCode}\n\nDownload now: https://theneatifyteam.com/download`;
       await Share.share({
         message,
         title: "Refer & Earn",

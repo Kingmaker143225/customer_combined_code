@@ -28,7 +28,7 @@ interface WhyChooseUsData {
 }
 
 const DEFAULT_DATA: WhyChooseUsData = {
-  title: "Why Choose Neatify?",
+  title: "Why Choose The Neatify Team?",
   subtitle: "We make home services simple, reliable and stress-free.",
   features: [
     { icon: "shield-check-outline", iconFamily: "MaterialCommunityIcons", title: "Verified & Trained Professionals", description: "Skilled experts you can trust." },
