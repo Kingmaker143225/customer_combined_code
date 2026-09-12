@@ -772,10 +772,10 @@ export default function LoginScreen(props: any) {
         });
       }
 
-      navigation.reset({ index: 0, routes: [{ name: "HomeDrawer" }] });
+      // navigation.reset({ index: 0, routes: [{ name: "HomeDrawer" }] });
     } catch (err) {
       console.error("Profile check/create failed:", err);
-      navigation.reset({ index: 0, routes: [{ name: "HomeDrawer" }] });
+      // navigation.reset({ index: 0, routes: [{ name: "HomeDrawer" }] });
     }
   };
 
