@@ -997,8 +997,19 @@ export default function CheckoutScreen({ route }: Props) {
     try {
       /* ================= 1️⃣ CREATE BOOKING (PENDING) ================= */
 
-      let promotionalBannerId = null;
-      if (couponApplied && coupon && coupon.source === "PROMOTIONAL_BANNER") {
+      // let promotionalBannerId = null;
+      // if (couponApplied && coupon && coupon.source === "PROMOTIONAL_BANNER") {
+      //   const claimed = await getClaimedOffer();
+      //   if (claimed && claimed.bannerId) {
+      //     promotionalBannerId = claimed.bannerId;
+      //   }
+      // }
+
+
+
+
+            let promotionalBannerId = null;
+      if (couponApplied && coupon) {
         const claimed = await getClaimedOffer();
         if (claimed && claimed.bannerId) {
           promotionalBannerId = claimed.bannerId;
