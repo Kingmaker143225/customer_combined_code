@@ -1609,10 +1609,64 @@ export default function BookingDetailsScreen({ route }: Props) {
       //   Alert.alert("Success", "Checklist submitted successfully!");
       // }
 
-      if (error) {
+  //     if (error) {
+  // console.log("Error details:", error.message);
+  // Alert.alert("Error", "Failed to save: " + error.message);
+  //     }
+// else {
+//   setIsChecklistSubmitted(true);
+//   await AsyncStorage.setItem(`booking_checklist_submitted_${bookingId}`, 'true');
+
+//   Alert.alert(
+//     "Success",
+//     "Checklist submitted successfully!",
+//     [
+//       {
+//         text: "OK",
+//         onPress: () => {
+//           navigation.reset({
+//             index: 0,
+//             routes: [
+//               {
+//                 name: "HomeDrawer",
+//                 params: {
+//                   screen: "AuthenticatedScreens",
+//                   params: {
+//                     screen: "MainTabs",
+//                     params: {
+//                       screen: "HomeTab",
+//                     },
+//                   },
+//                 },
+//               },
+//             ],
+//           });
+//         },
+//       },
+//     ],
+//     { cancelable: false }
+//   );
+// }
+
+if (error) {
   console.log("Error details:", error.message);
   Alert.alert("Error", "Failed to save: " + error.message);
 } else {
+  // ✅ Flip checklist_submitted = 'TRUE' on the bookings row (uppercase text)
+  const { error: flagError } = await supabase
+    .from("bookings")
+    .update({ checklist_submitted: "TRUE" })
+    .eq("id", bookingId);
+
+  if (flagError) {
+    console.log(
+      "Failed to update checklist_submitted flag (non-critical):",
+      flagError.message
+    );
+  } else {
+    console.log("✅ bookings.checklist_submitted set to 'TRUE'");
+  }
+
   setIsChecklistSubmitted(true);
   await AsyncStorage.setItem(`booking_checklist_submitted_${bookingId}`, 'true');
 
@@ -1658,30 +1712,71 @@ export default function BookingDetailsScreen({ route }: Props) {
 
 
   // Real-time subscription for booking updates (OTPs, staff assignment, etc.)
+  // useEffect(() => {
+  //   if (!booking.id) return;
+
+  //   const subscription = supabase
+  //     .channel(`booking:${booking.id}`)
+  //     .on(
+  //       'postgres_changes',
+  //       {
+  //         event: 'UPDATE',
+  //         schema: 'public',
+  //         table: 'bookings',
+  //         filter: `id=eq.${booking.id}`,
+  //       },
+  //       (payload) => {
+  //         console.log('Booking updated:', payload.new);
+  //         setBooking(payload.new as typeof booking);
+  //       }
+  //     )
+  //     .subscribe();
+
+  //   return () => {
+  //     subscription.unsubscribe();
+  //   };
+  // }, [booking.id]);
+
+
+
+
   useEffect(() => {
-    if (!booking.id) return;
+  if (!booking.id) return;
+  const loadChecklist = async () => {
+    try {
+      // 1. Local cache
+      const stored = await AsyncStorage.getItem(`booking_checklist_${booking.id}`);
+      if (stored) {
+        setChecklist(JSON.parse(stored));
+      }
 
-    const subscription = supabase
-      .channel(`booking:${booking.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'bookings',
-          filter: `id=eq.${booking.id}`,
-        },
-        (payload) => {
-          console.log('Booking updated:', payload.new);
-          setBooking(payload.new as typeof booking);
-        }
-      )
-      .subscribe();
+      const localSubmitted = await AsyncStorage.getItem(
+        `booking_checklist_submitted_${booking.id}`
+      );
+      if (localSubmitted === "true") {
+        setIsChecklistSubmitted(true);
+      }
 
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [booking.id]);
+      // 2. Remote flag (uppercase text) — source of truth across devices
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("checklist_submitted")
+        .eq("id", booking.id)
+        .maybeSingle();
+
+      if (!error && String(data?.checklist_submitted || "").toUpperCase() === "TRUE") {
+        setIsChecklistSubmitted(true);
+        await AsyncStorage.setItem(
+          `booking_checklist_submitted_${booking.id}`,
+          "true"
+        );
+      }
+    } catch (e) {
+      console.warn("Failed to load checklist", e);
+    }
+  };
+  loadChecklist();
+}, [booking.id]);
 
   // 🟢 NEW POLICY: Calculate time difference and deep cleaning status
   const { diffHours, isDeepCleaning } = React.useMemo(() => {
@@ -2256,14 +2351,14 @@ export default function BookingDetailsScreen({ route }: Props) {
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <Text style={[styles.section, { color: theme.text, marginBottom: 0, marginTop: 0 }]}>Service Checklist</Text>
-              {normalizedWorkStatus === "COMPLETED" && (
+              {normalizedWorkStatus === "UNDER_REVIEW" && (
                 <Text style={{ fontSize: 14, fontWeight: '700', color: isDark ? "#4ade80" : "#16a34a" }}>
                   {checklistProgress} / {checklistItems.length} completed
                 </Text>
               )}
             </View>
 
-            {normalizedWorkStatus !== "COMPLETED" ? (
+            {normalizedWorkStatus !== "UNDER_REVIEW" ? (
               <View style={{
                 backgroundColor: theme.surfaceVariant,
                 padding: 24,
@@ -2279,7 +2374,9 @@ export default function BookingDetailsScreen({ route }: Props) {
                   Checklist Locked
                 </Text>
                 <Text style={{ color: theme.textLight, fontSize: 13, textAlign: "center", lineHeight: 20 }}>
-                  Service must be completed (Start and End OTPs verified) to unlock this checklist.
+                  {/* Service must be completed (Start and End OTPs verified) to unlock this checklist. */}
+                    Checklist will be available once the service moves to UNDER_REVIEW status.
+
                 </Text>
               </View>
             ) : (
