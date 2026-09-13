@@ -13,6 +13,8 @@ export interface PromotionalBanner {
   image_url: string;
   is_active: boolean;
   display_order: number;
+  start_date?: string | null;
+  end_date?: string | null;
 }
 
 interface PromotionalBannerSliderProps {
